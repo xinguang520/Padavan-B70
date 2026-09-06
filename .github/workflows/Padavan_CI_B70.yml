@@ -89,13 +89,25 @@ jobs:
         env:
           TNAME: B70
         run: |
+          set -o pipefail
           export TNAME=B70
           fakeroot ./build_firmware_modify "$TNAME" 2>&1 | tee build.log
           if ! ls images/*.trx 1>/dev/null 2>&1; then
             echo "::error::Build produced no .trx!"
-            tail -50 build.log
+            echo "--- LAST 200 LINES OF build.log ---"
+            tail -200 build.log
+            echo "--- END build.log ---"
             exit 1
           fi
+
+      - name: Upload build log (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ github.run_id }}
+          path: padavan-4.4/trunk/build.log
+          if-no-files-found: ignore
+          retention-days: 3
 
       - name: Run post-build (bundle storage files)
         working-directory: padavan-4.4/trunk
