@@ -1,0 +1,20 @@
+# notify.sh 配置文件
+# 用法: cp notify.conf.example /etc/storage/notify.conf && vi notify.conf
+# 不需要的渠道就把对应字段留空
+
+# === Telegram ===
+# 创建机器人: @BotFather -> /newbot
+TG_BOT_TOKEN=""
+TG_CHAT_ID=""
+# router 自己没法访问 tg 时,走 Clash 自身代理
+TG_USE_PROXY="1"
+TG_PROXY_ADDR="http://127.0.0.1:7890"
+
+# === Email ===
+# 支持 SMTP_SSL(465)/STARTTLS(587)/plain(25)
+SMTP_HOST=""
+SMTP_PORT="465"
+SMTP_USER=""
+SMTP_PASS=""
+SMTP_FROM="b70@hiwifi.cn"
+SMTP_TO=""

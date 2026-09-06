@@ -1,0 +1,7 @@
+# 机场订阅文件示例
+# 把你的机场订阅链接整段 base64 解码后粘到 proxies 列表里
+# 或者保留 url 字段让路由器端在线抓取
+url: "https://your-air-provider.example.com/link?clash=xxx&token=yyy"
+# ua: "clash.meta"  # 可选 User-Agent
+# interval: 86400  # 拉取间隔
+proxies: []

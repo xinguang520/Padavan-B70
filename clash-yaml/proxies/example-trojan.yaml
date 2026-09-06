@@ -1,0 +1,11 @@
+# 节点示例 2: Trojan
+- name: "my-vps-trojan"
+  type: trojan
+  server: your-vps.example.com
+  port: 443
+  password: your-password
+  udp: true
+  sni: your-vps.example.com
+  alpn:
+    - h2
+    - http/1.1

@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="refresh" content="10">
+<title>B70 Padavan 状态面板</title>
+<style>
+:root {
+    --bg: #f7f8fa;
+    --card: #ffffff;
+    --border: #e6e8eb;
+    --text: #1f2328;
+    --text-mute: #656d76;
+    --green: #1a7f37;
+    --red: #cf222e;
+    --yellow: #9a6700;
+    --blue: #0969da;
+    --shadow: 0 1px 3px rgba(31,35,40,0.12);
+}
+* { box-sizing: border-box; }
+body {
+    margin: 0;
+    padding: 16px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 14px;
+}
+h1 { margin: 0 0 16px; font-size: 22px; }
+.cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+}
+.card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    box-shadow: var(--shadow);
+}
+.card h3 {
+    margin: 0 0 8px;
+    font-size: 12px;
+    color: var(--text-mute);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.metric { font-size: 26px; font-weight: 600; }
+.metric small { font-size: 14px; color: var(--text-mute); font-weight: 400; }
+.bar {
+    margin-top: 8px;
+    height: 6px;
+    background: #d0d7de;
+    border-radius: 3px;
+    overflow: hidden;
+}
+.bar-fill { height: 100%; transition: width 0.4s; }
+.bar-fill.green  { background: var(--green); }
+.bar-fill.yellow { background: var(--yellow); }
+.bar-fill.red    { background: var(--red); }
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 6px;
+}
+th, td {
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+}
+th { font-size: 11px; color: var(--text-mute); text-transform: uppercase; }
+.status {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+}
+.status.up   { background: #dafbe1; color: var(--green); }
+.status.down { background: #ffebe9; color: var(--red); }
+.muted { color: var(--text-mute); }
+.banner {
+    background: #fff8c5;
+    border: 1px solid #d4a72c;
+    color: var(--yellow);
+    padding: 8px 12px;
+    border-radius: 6px;
+    margin-bottom: 12px;
+}
+footer {
+    margin-top: 20px;
+    text-align: center;
+    color: var(--text-mute);
+    font-size: 11px;
+}
+</style>
+</head>
+<body>
+
+<h1>🛰️ B70 Padavan 状态面板</h1>
+<div class="muted" style="margin-bottom:14px">刷新间隔 10s · <?= $_SERVER['SERVER_NAME'] ?? 'B70' ?></div>
+
+<?php
+// 数据来源: PHP 调 shell 读路由器状态
+// 不依赖 /etc/storage/www/status.json,直接在本请求内采集
+
+function cmd($c) { $o=[]; exec("$c 2>&1",$o); return trim(implode("\n",$o)); }
+function first_line($c) { $r = cmd($c); return explode("\n", $r)[0] ?? ''; }
+
+$cpuinfo = file_get_contents('/proc/stat');
+preg_match('/^cpu\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/m', $cpuinfo, $cm);
+$cpu_total = $cm[1]+$cm[2]+$cm[3]+$cm[4];
+$cpu_idle = $cm[4];
+$cpu_pct = $cpu_total > 0 ? round(100 * (1 - $cpu_idle / $cpu_total), 1) : 0;
+
+$meminfo = file_get_contents('/proc/meminfo');
+preg_match('/MemTotal:\s+(\d+)/', $meminfo, $mt);
+preg_match('/MemFree:\s+(\d+)/', $meminfo, $mf);
+preg_match('/Buffers:\s+(\d+)/', $meminfo, $mb);
+preg_match('/Cached:\s+(\d+)/', $meminfo, $mc);
+$mem_total_kb = intval($mt[1] ?? 0);
+$mem_used_kb  = $mem_total_kb - intval($mf[1] ?? 0) - intval($mb[1] ?? 0) - intval($mc[1] ?? 0);
+$mem_pct = $mem_total_kb > 0 ? round(100 * $mem_used_kb / $mem_total_kb, 1) : 0;
+
+$uptime_raw = first_line('cat /proc/uptime');
+$up_sec = intval(explode(' ', $uptime_raw)[0]);
+$up_str = sprintf('%d天%d小时%d分', intval($up_sec/86400), intval(($up_sec%86400)/3600), intval(($up_sec%3600)/60));
+
+$loadavg = first_line('cat /proc/loadavg');
+$loads = explode(' ', $loadavg);
+
+$wan_ip = first_line('nvram get wan_ipaddr');
+$lan_ip = first_line('nvram get lan_ipaddr');
+
+$df_out = first_line('df -k /etc/storage | tail -1');
+$dparts = preg_split('/\s+/', $df_out);
+$disk_pct = isset($dparts[4]) ? intval(rtrim($dparts[4], '%')) : 0;
+$disk_total = (isset($dparts[1]) ? intval($dparts[1]) : 0) * 1024;
+$disk_used  = (isset($dparts[2]) ? intval($dparts[2]) : 0) * 1024;
+
+function proc_info($n) {
+    $pid = trim(shell_exec("pidof $n 2>/dev/null"));
+    if (!$pid) return ['up'=>false,'mem'=>''];
+    $rss = trim(shell_exec("cat /proc/" . explode(' ', $pid)[0] . "/status 2>/dev/null | grep VmRSS | awk '{print \$2}'"));
+    return ['up'=>true,'mem'=> $rss ? sprintf('%.1f MB', intval($rss)/1024) : ''];
+}
+$services = [
+    ['name'=>'aria2c',     'info'=>proc_info('aria2c')],
+    ['name'=>'clash',      'info'=>proc_info('clash')],
+    ['name'=>'tailscaled', 'info'=>proc_info('tailscaled')],
+    ['name'=>'sing-box',   'info'=>proc_info('sing-box')],
+    ['name'=>'httpd',      'info'=>proc_info('httpd')],
+    ['name'=>'php-fpm',    'info'=>proc_info('php-fpm')],
+];
+
+// 新固件检测
+$pending = '';
+$log = '/etc/storage/auto_upgrade.log';
+if (file_exists($log)) {
+    $lines = array_reverse(file($log));
+    foreach ($lines as $l) {
+        if (strpos($l, 'NEW firmware downloaded') !== false) {
+            if (preg_match('/to (\S+)/', $l, $mm)) $pending = $mm[1];
+            break;
+        }
+    }
+}
+
+function color_class($pct) {
+    if ($pct >= 85) return 'red';
+    if ($pct >= 65) return 'yellow';
+    return 'green';
+}
+function human_b($b) {
+    $u=['B','KB','MB','GB','TB']; $i=0;
+    while ($b >= 1024 && $i < count($u)-1) { $b /= 1024; $i++; }
+    return sprintf('%.2f %s', $b, $u[$i]);
+}
+?>
+
+<?php if ($pending): ?>
+<div class="banner">
+    ⚠️ 检测到新版固件已下载: <strong><?= htmlspecialchars($pending) ?></strong>
+    &nbsp;请到 <a href="/cgi-bin/luci/;stok=xxx/admin/system/firmware">系统管理 → 固件升级</a> 上传刷入。
+</div>
+<?php endif; ?>
+
+<div class="cards">
+    <div class="card">
+        <h3>CPU 使用率</h3>
+        <div class="metric"><?= $cpu_pct ?><small>%</small></div>
+        <div class="bar"><div class="bar-fill <?= color_class($cpu_pct) ?>" style="width:<?= $cpu_pct ?>%"></div></div>
+    </div>
+
+    <div class="card">
+        <h3>内存</h3>
+        <div class="metric"><?= $mem_pct ?><small>%</small></div>
+        <div style="font-size:12px; color:var(--text-mute); margin-top:4px">
+            <?= human_b($mem_used_kb * 1024) ?> / <?= human_b($mem_total_kb * 1024) ?>
+        </div>
+        <div class="bar"><div class="bar-fill <?= color_class($mem_pct) ?>" style="width:<?= $mem_pct ?>%"></div></div>
+    </div>
+
+    <div class="card">
+        <h3>JFFS2 (/etc/storage)</h3>
+        <div class="metric"><?= $disk_pct ?><small>%</small></div>
+        <div style="font-size:12px; color:var(--text-mute); margin-top:4px">
+            <?= human_b($disk_used) ?> / <?= human_b($disk_total) ?>
+        </div>
+        <div class="bar"><div class="bar-fill <?= color_class($disk_pct) ?>" style="width:<?= $disk_pct ?>%"></div></div>
+    </div>
+
+    <div class="card">
+        <h3>运行时长</h3>
+        <div class="metric" style="font-size:16px"><?= $up_str ?></div>
+        <div style="font-size:12px; color:var(--text-mute); margin-top:6px">
+            负载: <?= $loads[0] ?> / <?= $loads[1] ?> / <?= $loads[2] ?>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>网络</h3>
+        <div style="font-size:13px; line-height:1.7">
+            WAN: <strong><?= htmlspecialchars($wan_ip) ?></strong><br>
+            LAN: <strong><?= htmlspecialchars($lan_ip) ?></strong>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>服务状态</h3>
+        <table>
+            <?php foreach ($services as $s): ?>
+            <tr>
+                <td><?= $s['name'] ?></td>
+                <td>
+                    <?php if ($s['info']['up']): ?>
+                        <span class="status up">UP</span>
+                        <span class="muted" style="font-size:11px; margin-left:4px"><?= $s['info']['mem'] ?></span>
+                    <?php else: ?>
+                        <span class="status down">DOWN</span>
+                    <?php endif; ?>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+    </div>
+</div>
+
+<footer>
+    数据采集时间: <?= date('Y-m-d H:i:s') ?> · 由 monitor.sh 驱动 · <a href="/cgi-bin/luci/">Padavan 后台</a>
+</footer>
+
+</body>
+</html>

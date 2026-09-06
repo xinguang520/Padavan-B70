@@ -1,0 +1,8 @@
+{
+  "_comment": "占位文件。真实 status.json 由 monitor.sh 在路由器端定期生成。",
+  "ts": "never",
+  "cpu": 0,
+  "memory": { "pct": 0, "used": 0, "total": 0 },
+  "disk":   { "pct": 0, "used": 0, "total": 0 },
+  "services": {}
+}

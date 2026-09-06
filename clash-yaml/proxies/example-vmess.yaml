@@ -1,0 +1,15 @@
+# 节点示例 1: 自建 VPS (Vmess)
+- name: "my-vps-vmess"
+  type: vmess
+  server: your-vps.example.com
+  port: 443
+  uuid: 00000000-0000-0000-0000-000000000000
+  alterId: 0
+  cipher: auto
+  tls: true
+  network: ws
+  ws-opts:
+    path: /yourpath
+    headers:
+      Host: your-vps.example.com
+  udp: true

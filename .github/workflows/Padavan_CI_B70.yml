@@ -1,0 +1,154 @@
+# GitHub Actions 自动编译 Padavan (B70) - 含 ShellClash / Tailscale / aria2 / PHP 探针 / OTA
+# 触发方式:
+#   1. 手动: Actions 页 -> Run workflow
+#   2. 定时: 每天 UTC 0:00 自动
+#   3. push: 改 configs/scripts/etc_storage 都会触发
+#   4. Star 一次仓库触发首次
+
+name: "Padavan CI B70"
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * *"
+  push:
+    branches: [main, master]
+    paths:
+      - 'configs/**'
+      - 'scripts/**'
+      - 'etc_storage/**'
+      - 'clash-yaml/**'
+      - 'www/**'
+      - '.github/workflows/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout (this repo)
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/share/swift
+          sudo apt-get clean
+          df -h
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            unzip libtool-bin curl cmake gperf gawk flex bison \
+            cpio git python3-docutils gettext automake autopoint texinfo \
+            build-essential help2man pkg-config zlib1g-dev libgmp3-dev libmpc-dev \
+            libmpfr-dev libncurses5-dev libltdl-dev wget libc-dev-bin bc fakeroot kmod \
+            file rsync ncurses-dev
+
+      - name: Clone Padavan upstream source
+        run: |
+          if [ ! -d "padavan-4.4" ]; then
+            git clone --depth 1 https://github.com/hanwckf/rt-n56u.git padavan-4.4
+          else
+            echo "padavan-4.4 already present"
+          fi
+          cd padavan-4.4
+          git submodule update --init --recursive || true
+          git log -1 --oneline
+
+      - name: Drop in B70.config
+        run: |
+          mkdir -p padavan-4.4/trunk/configs/templates
+          cp -v "$GITHUB_WORKSPACE/configs/templates/B70.config" \
+                padavan-4.4/trunk/configs/templates/B70.config
+          head -20 padavan-4.4/trunk/configs/templates/B70.config
+
+      - name: Drop in post-build scripts
+        run: |
+          mkdir -p padavan-4.4/trunk/scripts
+          cp -rT "$GITHUB_WORKSPACE/scripts"   padavan-4.4/trunk/scripts/
+
+      - name: Drop in /etc/storage scripts (router runtime)
+        run: |
+          mkdir -p padavan-4.4/trunk/scripts/etc_storage
+          mkdir -p padavan-4.4/trunk/scripts/etc_storage/www
+          cp -rT "$GITHUB_WORKSPACE/etc_storage"        padavan-4.4/trunk/scripts/etc_storage/
+          cp -f  "$GITHUB_WORKSPACE/www/dashboard.html" padavan-4.4/trunk/scripts/etc_storage/www/dashboard.html
+          find padavan-4.4/trunk/scripts/etc_storage -type f | head -30
+
+      - name: Download toolchain (mipsel)
+        working-directory: padavan-4.4/toolchain-mipsel
+        run: |
+          chmod +x ./dl_toolchain.sh
+          ./dl_toolchain.sh
+          ls toolchain-*
+
+      - name: Build B70 firmware
+        working-directory: padavan-4.4/trunk
+        env:
+          TNAME: B70
+        run: |
+          export TNAME=B70
+          fakeroot ./build_firmware_modify "$TNAME" 2>&1 | tee build.log
+          if ! ls images/*.trx 1>/dev/null 2>&1; then
+            echo "::error::Build produced no .trx!"
+            tail -50 build.log
+            exit 1
+          fi
+
+      - name: Run post-build (bundle storage files)
+        working-directory: padavan-4.4/trunk
+        run: |
+          bash ../scripts/post_build.sh B70 || bash scripts/post_build.sh B70 || true
+
+      - name: List output
+        working-directory: padavan-4.4/trunk/images
+        run: |
+          ls -lah
+          echo "---"
+          echo "TRX size:"
+          du -h *.trx
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: B70-firmware-${{ github.run_id }}
+          path: |
+            padavan-4.4/trunk/images/*.trx
+            padavan-4.4/trunk/scripts/etc_storage/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Publish to Release
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          TRX=$(ls padavan-4.4/trunk/images/*.trx 2>/dev/null | head -1)
+          if [ -z "$TRX" ]; then
+            echo "no .trx found, skip release"
+            exit 0
+          fi
+
+          if [ -n "$GITHUB_REF_NAME" ] && [ "$GITHUB_REF_NAME" != "main" ] && [ "$GITHUB_REF_NAME" != "master" ]; then
+            TAG="$GITHUB_REF_NAME"
+          else
+            TAG="nightly-$(date -u +%Y%m%d-%H%M)"
+          fi
+
+          echo "release tag: $TAG, artifact: $TRX"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release delete "$TAG" --yes --cleanup-tag >/dev/null 2>&1 || true
+          fi
+
+          gh release create "$TAG" "$TRX" \
+              --title "B70 Padavan $TAG" \
+              --notes "Auto-built firmware. /etc_storage/* scripts are bundled as Artifacts." \
+              --target "$GITHUB_SHA" \
+              --prerelease=false
+
+          echo "::set-output name=release_tag::$TAG"
+          echo "release: $TAG published"

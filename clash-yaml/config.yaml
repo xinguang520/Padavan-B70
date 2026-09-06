@@ -1,0 +1,93 @@
+# Clash Meta 主配置 (路由器使用此份)
+# 路由器拉取脚本: /etc/storage/clash_yaml_pull.sh
+# 来源仓库路径: clash-yaml/config.yaml
+
+mixed-port: 7890
+allow-lan: true
+mode: rule
+log-level: info
+ipv6: false
+geodata-mode: true
+geox-url:
+  geoip: "https://mirror.ghproxy.com/https://github.com/MetaCubeX/meta-rules-dat/raw/release/geoip.dat"
+  geosite: "https://mirror.ghproxy.com/https://github.com/MetaCubeX/meta-rules-dat/raw/release/geosite.dat"
+
+# --- 外部 Rule Provider (由本仓库的 rules/ 目录提供) ---
+rule-providers:
+  private:
+    type: http
+    behavior: domain
+    url: "https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/clash-yaml/rules/private.yaml"
+    interval: 86400
+    path: ./rules/private.yaml
+
+  gfw:
+    type: http
+    behavior: domain
+    url: "https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/clash-yaml/rules/gfw.yaml"
+    interval: 86400
+    path: ./rules/gfw.yaml
+
+  cncidr:
+    type: http
+    behavior: ipcidr
+    url: "https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/clash-yaml/rules/cncidr.yaml"
+    interval: 86400
+    path: ./rules/cncidr.yaml
+
+  lancidr:
+    type: http
+    behavior: ipcidr
+    url: "https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/clash-yaml/rules/lancidr.yaml"
+    interval: 86400
+    path: ./rules/lancidr.yaml
+
+  applications:
+    type: http
+    behavior: classical
+    url: "https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/clash-yaml/rules/applications.yaml"
+    interval: 86400
+    path: ./rules/applications.yaml
+
+# --- 代理节点 (proxies 部分从 subscriptions/ 自动合并) ---
+# 直接编辑 proxies/ 下的 yaml 片段即可,不需要动本文件
+proxies:
+  # ↓↓↓ 占位;被 clash_yaml_pull.sh 合并 subscriptions/* 后替换 ↓↓↓
+  - name: "DIRECT"
+    type: select
+    proxies:
+      - DIRECT
+  # ↑↑↑ 占位结束 ↑↑↑
+
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies:
+      - AUTO
+      - DIRECT
+      - REJECT
+  - name: AUTO
+    type: url-test
+    url: "http://www.gstatic.com/generate_204"
+    interval: 300
+    tolerance: 50
+    # ↓↓↓ 占位;被 clash_yaml_pull.sh 合并 subscriptions/* 后替换 ↓↓↓
+    proxies: [DIRECT]
+    # ↑↑↑ 占位结束 ↑↑↑
+  - name: REJECT
+    type: select
+    proxies:
+      - REJECT
+
+rules:
+  # 1. 私有直连 (内网/局域网)
+  - RULE-SET,private,DIRECT
+  - RULE-SET,lancidr,DIRECT,no-resolve
+  - RULE-SET,applications,DIRECT
+  # 2. 国内 IP 直连
+  - RULE-SET,cncidr,DIRECT,no-resolve
+  # 3. GFW 列表走代理
+  - RULE-SET,gfw,PROXY
+  # 4. 兜底
+  - GEOIP,CN,DIRECT,no-resolve
+  - MATCH,PROXY
