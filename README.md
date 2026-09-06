@@ -1,7 +1,9 @@
 # 极路由 B70 Padavan 固件自动编译 + 运行时套件 (GitHub Actions)
 
-> 自带 **aria2 + PHP 探针**（编译进固件）。
+> 自带 **aria2 + PHP 探针**（编译进固件）。  
 > **ShellClash（常开）+ Tailscale（按需常驻）+ aria2 + OTA 自动升级 + Telegram/邮件通知 + Dashboard** 一次打包。
+
+
 
 ---
 
@@ -92,17 +94,17 @@ git push -u origin main
 
 ## 📦 完整功能清单
 
-| 模块 | 来源 | 体积 | 控制命令 |
-|---|---|---|---|
-| **aria2** | 编译进 firmware | ~1.5 MB | `aria2.sh start/stop` |
-| **PHP 探针** | 编译进 firmware | <100 KB | `http://192.168.123.1/probe.php` |
-| **ShellClash** | 首次启动拉取 (jffs2) | ~10 MB | `startup.sh clash-start` |
-| **Tailscale** | 首次启动拉取 (jffs2) | ~8 MB | `tailscale.sh install` |
-| **Clash YAML** | 仓库托管 → 路由器 cron 拉取 | - | `startup.sh yaml-pull` |
-| **Tailscale 自动升级** | cron 每周日检查 | - | `startup.sh ts-upgrade` |
-| **OTA 升级** | cron 每 10 分钟检测 | - | `startup.sh fw-check` |
-| **Telegram / 邮件通知** | 事件触发 | - | `notify.sh` |
-| **Dashboard 面板** | cron 每分钟刷新 | - | `http://192.168.123.1/cgi-bin/storage/www/dashboard.html` |
+| 模块                  | 来源                 | 体积      | 控制命令                                                      |
+| ------------------- | ------------------ | ------- | --------------------------------------------------------- |
+| **aria2**           | 编译进 firmware       | ~1.5 MB | `aria2.sh start/stop`                                     |
+| **PHP 探针**          | 编译进 firmware       | <100 KB | `http://192.168.123.1/probe.php`                          |
+| **ShellClash**      | 首次启动拉取 (jffs2)     | ~10 MB  | `startup.sh clash-start`                                  |
+| **Tailscale**       | 首次启动拉取 (jffs2)     | ~8 MB   | `tailscale.sh install`                                    |
+| **Clash YAML**      | 仓库托管 → 路由器 cron 拉取 | -       | `startup.sh yaml-pull`                                    |
+| **Tailscale 自动升级**  | cron 每周日检查         | -       | `startup.sh ts-upgrade`                                   |
+| **OTA 升级**          | cron 每 10 分钟检测     | -       | `startup.sh fw-check`                                     |
+| **Telegram / 邮件通知** | 事件触发               | -       | `notify.sh`                                               |
+| **Dashboard 面板**    | cron 每分钟刷新         | -       | `http://192.168.123.1/cgi-bin/storage/www/dashboard.html` |
 
 ---
 
@@ -113,6 +115,7 @@ git push -u origin main
 ```
 ssh admin@192.168.123.1     # 密码 admin
 ```
+
 
 ### 2) 上传本仓库的脚本到路由器
 
@@ -223,7 +226,6 @@ sh -c "$(curl -kfsSl https://raw.githubusercontent.com/juewuy/ShellClash/master/
 
 1. 进你 fork 的仓库 → 进入 `clash-yaml/` 目录
 2. **加新节点：** 在 `proxies/` 下点 `Add file → Create new file`，文件名 `my-vps.yaml`：
-
    ```yaml
    - name: "my-vps"
      type: vmess
@@ -234,7 +236,6 @@ sh -c "$(curl -kfsSl https://raw.githubusercontent.com/juewuy/ShellClash/master/
      cipher: auto
      tls: true
    ```
-
 3. **加机场订阅：** 编辑 `subscriptions/airport-1.yaml`，把机场给你的 URL 填进 `url:` 字段
 4. **改主配置：** 编辑 `config.yaml`，改完保存即可
 5. **Commit changes**
@@ -264,13 +265,10 @@ vi /etc/storage/clash/config.yaml        # 直接改
    https://api.telegram.org/bot<TOKEN>/getUpdates
    ```
    找到 `"chat":{"id":123456789}` 里的数字（你的 chat_id）
-
 3. 编辑 `/etc/storage/notify.conf`：
-
    ```bash
    vi /etc/storage/notify.conf
    ```
-
    填入：
 
 ```bash
@@ -307,7 +305,7 @@ SMTP_TO="you@gmail.com"
 /etc/storage/tailscale.sh start
 ```
 
-3. Tailscale 后台 `Machines` 应该看到 `B70` 节点。
+1. Tailscale 后台 `Machines` 应该看到 `B70` 节点。
 
 ---
 
@@ -315,12 +313,12 @@ SMTP_TO="you@gmail.com"
 
 ### CI 何时自动跑？
 
-| 触发 | 自动化 | 备注 |
-|---|---|---|
-| 改任何 `.config / .sh / .yml` 后 push | ✅ | workflow 头 `push:` 段 |
-| 每天 UTC 0:00 | ✅ | `schedule.cron: 0 0 * * *` |
-| 你手动点 `Run workflow` | ✅ | Actions 页 |
-| Star / Unstar 仓库 | ✅ | 强迫触发用 |
+| 触发                                | 自动化 | 备注                         |
+| --------------------------------- | --- | -------------------------- |
+| 改任何 `.config / .sh / .yml` 后 push | ✅   | workflow 头 `push:` 段       |
+| 每天 UTC 0:00                       | ✅   | `schedule.cron: 0 0 * * *` |
+| 你手动点 `Run workflow`               | ✅   | Actions 页                  |
+| Star / Unstar 仓库                  | ✅   | 强迫触发用                      |
 
 ### Release 自动发布
 
@@ -360,6 +358,7 @@ vi /etc/storage/startup.sh
 ```
 
 ---
+
 
 ## 📁 文件结构
 
@@ -406,21 +405,22 @@ b70-padavan-build/
 
 ---
 
+
 ## 🛟 故障排查
 
-| 症状 | 可能原因 | 解决 |
-|---|---|---|
-| Actions 编译失败 log 中 `fakeroot: command not found` | 依赖没装 | 看 GitHub Actions step `Install build deps` 输出 |
-| 编译 30 分钟没出 `.trx` | 工具链下载失败 | 重新 Run workflow；GitHub Actions 在网络波动时偶发 |
-| flash 后进不去 Padavan | Breed 没擦 flash | 重进 Breed 重刷，**勾上擦 flash** |
-| ShellClash 启动后 LAN 不走代理 | 没启用透明代理 | `/etc/storage/firewall_helpers.sh clash-on` |
-| Tailscale 起来后访问速度慢 | userspace-networking 性能差 | 改 `--tun=auto`（需 mt76 驱动，Tailscale 官方文档有说明）|
-| aria2 RPC 连不上 (192.168.123.1:6800) | 防火墙挡端口 | Padavan Web → 防火墙 → 开放 6800 |
-| Dashboard 打不开 (404) | www 文件没拷 | `cp /tmp/dashboard.html /etc/storage/www/` |
-| Telegram 通知发不出去 | bot 没收到 chat_id | 给 bot 发条消息再 `getUpdates` 看 chat_id |
-| `auto_upgrade.sh check` 老说 OK 但没新版 | GitHub API 限流 | 检查仓库名是否填对；等 1 小时再试 |
-| 路由器 RAM 满 | ShellClash + Tailscale 同时开 128 MB 顶满 | 改 `tailscale.sh stop` 关掉，或换 ShellClash 用 metacub 自动降级 |
-| 浏览器登 Padavan 后台慢 | dashboard.html 每 10s 刷新抢 CPU | 把 `dashboard.html` 里 `<meta http-equiv="refresh" content="10">` 改 30 或注释掉 |
+| 症状                                               | 可能原因                                 | 解决                                                                        |
+| ------------------------------------------------ | ------------------------------------ | ------------------------------------------------------------------------- |
+| Actions 编译失败 log 中 `fakeroot: command not found` | 依赖没装                                 | 看 GitHub Actions step `Install build deps` 输出                             |
+| 编译 30 分钟没出 `.trx`                                | 工具链下载失败                              | 重新 Run workflow；GitHub Actions 在网络波动时偶发                                   |
+| flash 后进不去 Padavan                               | Breed 没擦 flash                       | 重进 Breed 重刷，**勾上擦 flash**                                                 |
+| ShellClash 启动后 LAN 不走代理                          | 没启用透明代理                              | `/etc/storage/firewall_helpers.sh clash-on`                               |
+| Tailscale 起来后访问速度慢                               | userspace-networking 性能差             | 改 `--tun=auto`（需 mt76 驱动，Tailscale 官方文档有说明）                               |
+| aria2 RPC 连不上 (192.168.123.1:6800)               | 防火墙挡端口                               | Padavan Web → 防火墙 → 开放 6800                                               |
+| Dashboard 打不开 (404)                              | www 文件没拷                             | `cp /tmp/dashboard.html /etc/storage/www/`                                |
+| Telegram 通知发不出去                                  | bot 没收到 chat_id                      | 给 bot 发条消息再 `getUpdates` 看 chat_id                                        |
+| `auto_upgrade.sh check` 老说 OK 但没新版               | GitHub API 限流                        | 检查仓库名是否填对；等 1 小时再试                                                        |
+| 路由器 RAM 满                                        | ShellClash + Tailscale 同时开 128 MB 顶满 | 改 `tailscale.sh stop` 关掉，或换 ShellClash 用 metacub 自动降级                     |
+| 浏览器登 Padavan 后台慢                                 | dashboard.html 每 10s 刷新抢 CPU         | 把 `dashboard.html` 里 `<meta http-equiv="refresh" content="10">` 改 30 或注释掉 |
 
 ---
 
