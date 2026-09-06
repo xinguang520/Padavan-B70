@@ -77,6 +77,14 @@ jobs:
           cp -f  "$GITHUB_WORKSPACE/www/dashboard.html" padavan-4.4/trunk/scripts/etc_storage/www/dashboard.html
           find padavan-4.4/trunk/scripts/etc_storage -type f | head -30
 
+      - name: Patch dropbear: disable zlib (workaround for missing host zlib)
+        run: |
+          # 上游 dropbear Makefile 在新 Ubuntu 上 configure 时会探测 host 系统的 zlib。
+          # 我们的 zlib 在交叉编译 stage 里，host 没装。直接在 configure 里禁用 zlib，
+          # SSH 压缩去掉，但 SSH 仍正常工作 (B70 本来也不需要 SSH 压缩)。
+          sed -i 's/--enable-zlib/--disable-zlib/' padavan-4.4/trunk/user/dropbear/Makefile
+          grep -n "zlib" padavan-4.4/trunk/user/dropbear/Makefile || true
+
       - name: Download toolchain (mipsel)
         working-directory: padavan-4.4/toolchain-mipsel
         run: |
