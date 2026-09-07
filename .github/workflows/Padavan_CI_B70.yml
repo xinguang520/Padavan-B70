@@ -112,9 +112,10 @@ jobs:
 
           # 2) configure 前 export CFLAGS/LIBS, 解决 libc 6.x 移除 <rpc/rpc.h> 后
           #    dropbear conftest 失败 (需要 -ltirpc + -I/usr/include/tirpc)
+          # 20.04 container 自带 libc 包含 <rpc/rpc.h>, tirpc 给 22+ 用 -- 两者都需要
           old_cfg = "./configure \\\n\t\t--prefix=/usr"
           new_cfg = ("export CFLAGS=\"-I/usr/include/tirpc\"; "
-                    "export LIBS=\"-ltirpc\"; "
+                    "export LIBS=\"-ltirpc -ltirpc -lcrypt\"; "
                     "./configure \\\n\t\t--prefix=/usr")
           if old_cfg in src:
               src = src.replace(old_cfg, new_cfg)
@@ -123,8 +124,15 @@ jobs:
               # 退化到简单 sed 模式 - 在 ./configure 前插入
               src = src.replace(
                   "./configure \\\n",
-                  "export CFLAGS=\"-I/usr/include/tirpc\"; export LIBS=\"-ltirpc\"; ./configure \\\n",
+                  "export CFLAGS=\"-I/usr/include/tirpc\"; export LIBS=\"-ltirpc -ltirpc -lcrypt\"; ./configure \\\n",
                   1)
+
+          # 3) 关键: configure 失败时打印 config.log 到 stderr (默认 we 只看到一句谜语.
+          #    把 config.log 强制公开给我们看, 不用再 ping-pong 多 30 分钟一次)
+          src = src.replace(
+              "make configure",
+              "make configure; rc=$?; if [ $rc -ne 0 ]; then echo '=== DROPBEAR CONFIG.LOG (last 80 lines) ===' 1>&2; if [ -f dropbear-202X.XX/config.log ]; then tail -80 dropbear-202X.XX/config.log 1>&2; else find . -maxdepth 4 -name config.log -exec tail -80 {} \; 1>&2; fi; echo '=== END CONFIG.LOG ===' 1>&2; exit $rc; fi"
+          )
 
           if src == orig:
               print("WARN: no change applied to dropbear Makefile")
@@ -132,7 +140,7 @@ jobs:
 
           print("=== patched dropbear Makefile (relevant lines) ===")
           for line in src.splitlines():
-              if "tirpc" in line or "zlib" in line or line.startswith("./configure"):
+              if "tirpc" in line or "zlib" in line or "CONFIG.LOG" in line or line.startswith("./configure") or "config.log" in line or "make configure" in line or line.startswith("make configure"):
                   print("   ", line)
           PYEOF
 
