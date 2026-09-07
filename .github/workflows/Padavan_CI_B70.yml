@@ -1,9 +1,18 @@
-# GitHub Actions 自动编译 Padavan (B70) - 含 ShellClash / Tailscale / aria2 / PHP 探针 / OTA
+# GitHub Actions 自动编译 Padavan (极路由 B70 / HC5962)
+#
+# 背景:
+#   上游 hanwckf/rt-n56u 官方 CI 用的是 ubuntu-20.04,但该 runner 已于 2025-04-15 EOL 移除。
+#   在 ubuntu-24.04 (gcc-13) 上编译老代码会遇到两类问题:
+#     1) dropbear: configure 在交叉环境下探测不到 host 的 zlib / crypt
+#     2) gcc-13 把 implicit-function-declaration 等老告警升级为 error
+#   因此这里并行跑两个 runner,谁先编译出 .trx 就用谁的产物:
+#     - ubuntu-22.04: gcc-11,对老代码宽容,最接近官方 20.04 环境,成功率最高
+#     - ubuntu-24.04: 长期可用,额外注入 -Wno-error=* 兼容选项
+#
 # 触发方式:
-#   1. 手动: Actions 页 -> Run workflow
-#   2. 定时: 每天 UTC 0:00 自动
-#   3. push: 改 configs/scripts/etc_storage 都会触发
-#   4. Star 一次仓库触发首次
+#   1. 手动: Actions 页 -> Run workflow -> Run branch
+#   2. 定时: 每天 UTC 0:00 (北京时间 08:00)
+#   3. push: 改 configs/scripts/etc_storage/www/clash-yaml 或本文件都会触发
 
 name: "Padavan CI B70"
 
@@ -23,8 +32,22 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
+    name: "B70 @ ${{ matrix.runner }}"
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 22.04 = gcc-11,最接近官方 20.04,主力
+          - runner: ubuntu-22.04
+            compat_cflags: ""
+            publish_release: true
+          # 24.04 = gcc-13,靠 -Wno-error 兜底,长期可用
+          - runner: ubuntu-24.04
+            compat_cflags: "-Wno-error=implicit-function-declaration -Wno-error=implicit-int -Wno-error=int-conversion -Wno-error=incompatible-pointer-types -Wno-error=return-mismatch -Wno-error=builtin-declaration-mismatch"
+            publish_release: false
 
     steps:
       - name: Checkout (this repo)
@@ -32,8 +55,8 @@ jobs:
 
       - name: Free disk space
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/share/swift
-          sudo apt-get clean
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/share/swift || true
+          sudo apt-get clean || true
           df -h
 
       - name: Install build deps
@@ -50,8 +73,6 @@ jobs:
         run: |
           if [ ! -d "padavan-4.4" ]; then
             git clone --depth 1 https://github.com/hanwckf/rt-n56u.git padavan-4.4
-          else
-            echo "padavan-4.4 already present"
           fi
           cd padavan-4.4
           git submodule update --init --recursive || true
@@ -67,7 +88,7 @@ jobs:
       - name: Drop in post-build scripts
         run: |
           mkdir -p padavan-4.4/trunk/scripts
-          cp -rT "$GITHUB_WORKSPACE/scripts"   padavan-4.4/trunk/scripts/
+          cp -rT "$GITHUB_WORKSPACE/scripts" padavan-4.4/trunk/scripts/
 
       - name: Drop in /etc/storage scripts (router runtime)
         run: |
@@ -77,28 +98,77 @@ jobs:
           cp -f  "$GITHUB_WORKSPACE/www/dashboard.html" padavan-4.4/trunk/scripts/etc_storage/www/dashboard.html
           find padavan-4.4/trunk/scripts/etc_storage -type f | head -30
 
-      - name: "Patch dropbear - disable zlib (workaround for missing host zlib)"
+      - name: "Patch dropbear - host toolchain compatibility"
+        env:
+          COMPAT_CFLAGS: ${{ matrix.compat_cflags }}
         run: |
-          # Upstream dropbear Makefile probes host zlib on newer Ubuntu.
-          # Our zlib lives in the cross-compile stage dir, not on the host.
-          # Disable zlib in configure to skip host detection; SSH still works.
-          sed -i 's/--enable-zlib/--disable-zlib/' padavan-4.4/trunk/user/dropbear/Makefile
-          grep -n "zlib" padavan-4.4/trunk/user/dropbear/Makefile || true
+          python3 - <<'PYEOF'
+          import os, sys
+
+          MF = "padavan-4.4/trunk/user/dropbear/Makefile"
+          extra = os.environ.get("COMPAT_CFLAGS", "").strip()
+
+          src = open(MF, encoding="utf-8").read()
+          orig = src
+
+          # 1) zlib: 交叉环境下 configure 探测 host zlib 会失败 (zlib 实际在 trunk/stage)
+          #    关闭 zlib 只是去掉 SSH 压缩,SSH 本身照常工作
+          src = src.replace("--enable-zlib", "--disable-zlib")
+
+          # 2) crypt(): sysoptions.h 里有
+          #      #if DROPBEAR_SVR_PASSWORD_AUTH && !HAVE_CRYPT
+          #        #error "DROPBEAR_SVR_PASSWORD_AUTH requires `crypt()'."
+          #    configure 同样探测不到,直接注入宏
+          # 3) basename: compat.h 声明 char *basename(const char*) 与 toolchain 的
+          #    libgen.h (__xpg_basename) 冲突,用 HAVE_BASENAME 关掉自带声明
+          macros = "-DHAVE_CRYPT=1 -DHAVE_BASENAME=1"
+          if extra:
+              macros += " " + extra
+
+          old = "CFLAGS+=$(COPT) -ffunction-sections -fdata-sections"
+          if old in src:
+              src = src.replace(old, old + " " + macros)
+          else:
+              src += "\nCFLAGS+=%s\n" % macros
+              print("WARN: CFLAGS line not matched, appended instead")
+
+          # 4) crypt() 真正实现在 libcrypt,链接时补上
+          oldl = "LDFLAGS += -Wl,--gc-sections"
+          if oldl in src and "-lcrypt" not in src:
+              src = src.replace(oldl, oldl + " -lcrypt")
+
+          if src == orig:
+              print("WARN: no change applied to dropbear Makefile")
+          open(MF, "w", encoding="utf-8").write(src)
+
+          print("=== patched dropbear Makefile (relevant lines) ===")
+          for line in src.splitlines():
+              if any(k in line for k in ("zlib", "HAVE_CRYPT", "HAVE_BASENAME", "lcrypt")) \
+                 or line.startswith("CFLAGS+=") or line.startswith("LDFLAGS"):
+                  print("   ", line)
+          PYEOF
 
       - name: Download toolchain (mipsel)
         working-directory: padavan-4.4/toolchain-mipsel
         run: |
           chmod +x ./dl_toolchain.sh
           ./dl_toolchain.sh
-          ls toolchain-*
+          ls -d toolchain-* || ls
 
       - name: Build B70 firmware
         working-directory: padavan-4.4/trunk
         env:
           TNAME: B70
+          COMPAT_CFLAGS: ${{ matrix.compat_cflags }}
         run: |
           set -o pipefail
           export TNAME=B70
+          # 24.04 上把老代码的告警降级,避免 gcc-13 把它当 error
+          if [ -n "$COMPAT_CFLAGS" ]; then
+            export CFLAGS="$COMPAT_CFLAGS"
+            export CXXFLAGS="$COMPAT_CFLAGS"
+            echo "compat cflags: $COMPAT_CFLAGS"
+          fi
           fakeroot ./build_firmware_modify "$TNAME" 2>&1 | tee build.log
           if ! ls images/*.trx 1>/dev/null 2>&1; then
             echo "::error::Build produced no .trx!"
@@ -112,7 +182,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-log-${{ github.run_id }}
+          name: build-log-${{ matrix.runner }}-${{ github.run_id }}
           path: padavan-4.4/trunk/build.log
           if-no-files-found: ignore
           retention-days: 3
@@ -127,13 +197,12 @@ jobs:
         run: |
           ls -lah
           echo "---"
-          echo "TRX size:"
           du -h *.trx
 
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
-          name: B70-firmware-${{ github.run_id }}
+          name: B70-firmware-${{ matrix.runner }}-${{ github.run_id }}
           path: |
             padavan-4.4/trunk/images/*.trx
             padavan-4.4/trunk/scripts/etc_storage/**
@@ -141,7 +210,7 @@ jobs:
           retention-days: 14
 
       - name: Publish to Release
-        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/')
+        if: matrix.publish_release && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/'))
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -166,9 +235,6 @@ jobs:
 
           gh release create "$TAG" "$TRX" \
               --title "B70 Padavan $TAG" \
-              --notes "Auto-built firmware. /etc_storage/* scripts are bundled as Artifacts." \
+              --notes "Auto-built firmware (runner: ${{ matrix.runner }}). /etc_storage/* scripts are bundled as Artifacts." \
               --target "$GITHUB_SHA" \
               --prerelease=false
-
-          echo "::set-output name=release_tag::$TAG"
-          echo "release: $TAG published"
