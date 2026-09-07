@@ -121,7 +121,10 @@ jobs:
           #    configure 同样探测不到,直接注入宏
           # 3) basename: compat.h 声明 char *basename(const char*) 与 toolchain 的
           #    libgen.h (__xpg_basename) 冲突,用 HAVE_BASENAME 关掉自带声明
-          macros = "-DHAVE_CRYPT=1 -DHAVE_BASENAME=1"
+          # 4) libtommath 启用 -fstack-protector-strong, 但 toolchain-mipsel 的 uclibc
+          #    没提供 __stack_chk_guard/__stack_chk_fail, 链接会失败
+          #    关掉 stack protector (Padavan 用 uclibc+SSP 历来问题)
+          macros = "-DHAVE_CRYPT=1 -DHAVE_BASENAME=1 -fno-stack-protector -fno-stack-protector-strong"
           if extra:
               macros += " " + extra
 
@@ -163,12 +166,13 @@ jobs:
         run: |
           set -o pipefail
           export TNAME=B70
-          # 24.04 上把老代码的告警降级,避免 gcc-13 把它当 error
-          if [ -n "$COMPAT_CFLAGS" ]; then
-            export CFLAGS="$COMPAT_CFLAGS"
-            export CXXFLAGS="$COMPAT_CFLAGS"
-            echo "compat cflags: $COMPAT_CFLAGS"
-          fi
+          # 1) uclibc toolchain 不提供 __stack_chk_* 符号,
+          #    任何包启用 -fstack-protector 都会链接失败 -> 全局关闭
+          # 2) 24.04 上把老代码的告警降级,避免 gcc-13 把它当 error
+          export CFLAGS="-fno-stack-protector -fno-stack-protector-strong ${COMPAT_CFLAGS:-}"
+          export CXXFLAGS="$CFLAGS"
+          export LDFLAGS="${LDFLAGS:-} -fno-stack-protector"
+          echo "CFLAGS=$CFLAGS"
           fakeroot ./build_firmware_modify "$TNAME" 2>&1 | tee build.log
           if ! ls images/*.trx 1>/dev/null 2>&1; then
             echo "::error::Build produced no .trx!"
