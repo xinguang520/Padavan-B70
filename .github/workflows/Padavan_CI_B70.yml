@@ -109,7 +109,18 @@ jobs:
           #    关掉只是丢 SSH 压缩, SSH 本身仍能用.
           src = src.replace("--enable-zlib", "--disable-zlib")
 
-          # 2) crypt/basename 用 ac_cv_* 注入 (dropbear configure.ac 第 188-189 行探测):
+          # 2) 禁用 hardened build flags: dropbear configure.ac 第 71 行起会探测并注入
+          #    -fPIE / -pie / -Wl,-z,now / -Wl,-z,relro / -fstack-protector-strong /
+          #    -D_FORTIFY_SOURCE=2 等. uclibc 工具链 (gcc 7.4 + uclibc) 没有
+          #    __stack_chk_guard / __stack_chk_fail 符号, 链接时 ld 报
+          #    "undefined reference to `__stack_chk_*'" -> dropbearmulti 链接失败.
+          #    --disable-harden 整段跳过硬化标志注入, dropbear 仍可用, 仅失去 PIE/SP 等.
+          src = src.replace(
+              "--disable-zlib \\",
+              "--disable-zlib \\\n\t--disable-harden \\",
+          )
+
+          # 3) crypt/basename 用 ac_cv_* 注入 (dropbear configure.ac 第 188-189 行探测):
           #    - AC_CHECK_FUNC(crypt):       ac_cv_func_crypt=yes
           #    - AC_CHECK_LIB(crypt, crypt): ac_cv_search_crypt=-lcrypt
           #    - basename 与 toolchain libgen.h 冲突: ac_cv_func_basename=yes
