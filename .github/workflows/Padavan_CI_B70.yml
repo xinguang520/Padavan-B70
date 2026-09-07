@@ -1,9 +1,10 @@
 # GitHub Actions 自动编译 Padavan (极路由 B70 / HC5962)
 #
 # 核心思路:
-#   上游用 uifor/rt-n56u (hanwckf/rt-n56u 的活跃 fork, 2026-05 最后 commit),
-#   相比 hanwckf 多了 Linaro1985/padavan-ng 的包, 并"Modernize GitHub Actions
-#   build environment" 适配了当前 runner. 但还是 ubuntu-20.04 EOL 问题:
+#   上游用 hanwckf/rt-n56u (opt.cn2qq.com/padavan/ 镜像站的真实上游,
+#   文件命名规则 B70_3.4.3.9-099.trx 与 hanwckf 完全一致).
+#   官方 CI 用 ubuntu-20.04, 但该 runner image 在 2025-04-15 已被
+#   GitHub Actions EOL 移除。装回 20.04 工具链/库的最简单方法:
 #     用 ubuntu-latest runner + ubuntu:20.04 container image, 这样 host GCC 是新的
 #     但 step 内 apt/gcc 都是 20.04 = libc6-dev 含 rpc/rpc.h, dropbear conftest 通过
 #   另一个要点: dropbear 的交叉编译 conftest 探测 host zlib 会失败,
@@ -72,9 +73,9 @@ jobs:
       - name: Clone Padavan upstream source
         run: |
           if [ ! -d "padavan-4.4" ]; then
-            # uifor/rt-n56u: hanwckf/rt-n56u 的活跃 fork, 2026-05 最后 commit.
-            # 相比 hanwckf 多了 padavan-ng 的包, 并适配了现代 runner.
-            git clone --depth 1 https://github.com/uifor/rt-n56u.git padavan-4.4
+            # opt.cn2qq.com/padavan/ 镜像站的真实上游 = hanwckf/rt-n56u
+            # (文件命名 B70_3.4.3.9-099.trx 与上游完全一致, run#14 已验证)
+            git clone --depth 1 https://github.com/hanwckf/rt-n56u.git padavan-4.4
           fi
           cd padavan-4.4
           git submodule update --init --recursive || true
@@ -222,7 +223,7 @@ jobs:
           name: "Padavan B70 build ${{ github.run_id }}"
           body: |
             Auto-built Padavan firmware for 极路由 B70 (HC5962, MT7621).
-            Source: uifor/rt-n56u (2026-05, hanwckf/rt-n56u active fork).
+            Source: hanwckf/rt-n56u (opt.cn2qq.com/padavan/ 上游).
             🛠 Built with [Padavan CI B70](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
             • Includes: ShellClash + Tailscale + aria2 + Dashboard
             • See repo README for installation notes
