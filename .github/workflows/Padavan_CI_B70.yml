@@ -204,6 +204,53 @@ jobs:
           echo "---"
           du -h *.trx
 
+      - name: Compare with opt.cn2qq.com reference (sync monitor)
+        if: always()
+        run: |
+          echo "=== Comparing our build with opt.cn2qq.com/padavan/B70_3.4.3.9-099.trx ==="
+          REF_URL="https://opt.cn2qq.com/padavan/B70_3.4.3.9-099.trx"
+          REF_HEADERS=$(curl -sI "$REF_URL")
+          echo "$REF_HEADERS" | grep -iE "last-modified|content-length|etag"
+          REF_LAST_MOD=$(echo "$REF_HEADERS" | grep -i "^Last-Modified:" | sed 's/Last-Modified: //I' | tr -d '\r')
+          REF_MD5_NOW=$(curl -s "$REF_URL" | md5sum | awk '{print $1}')
+          echo "Reference MD5 (live): $REF_MD5_NOW"
+          echo "Reference Last-Modified: $REF_LAST_MOD"
+
+          if [ -f padavan-4.4/trunk/images/B70_3.4.3.9-099.trx ]; then
+            OUR_SIZE=$(stat -c %s padavan-4.4/trunk/images/B70_3.4.3.9-099.trx)
+            REF_SIZE=$(echo "$REF_HEADERS" | grep -i "^Content-Length:" | awk '{print $2}' | tr -d '\r')
+            echo "Our size   : $OUR_SIZE bytes"
+            echo "Ref size   : $REF_SIZE bytes (opt.cn2qq.com - they bundle more, different entry point)"
+
+            # 写入 build metadata 到 artifacts 供后续对比
+            {
+              echo "build_time=$(date -u +%FT%TZ)"
+              echo "hanwckf_master_commit=$(cd padavan-4.4 && git rev-parse HEAD)"
+              echo "our_trx_size=$OUR_SIZE"
+              echo "our_trx_md5=$(md5sum padavan-4.4/trunk/images/B70_3.4.3.9-099.trx | awk '{print $1}')"
+              echo "ref_opt_last_modified=$REF_LAST_MOD"
+              echo "ref_opt_md5=$REF_MD5_NOW"
+              echo "ref_opt_size=$REF_SIZE"
+            } > sync_state.txt
+            cat sync_state.txt
+            echo "---"
+            echo "NOTE: opt.cn2qq.com trx is 6MB larger (bundles more features into firmware)."
+            echo "Functional parity = hanwckf master commit hash matches what opt built from."
+            echo "Auto-sync policy: if hanwckf master advances or opt.cn2qq.com B70 updates,"
+            echo "rerun this workflow and verify opt.cn2qq.com/padavan/MD5.txt matches."
+          else
+            echo "::warning::Our trx missing — build failed"
+          fi
+
+      - name: Upload sync state artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-state-${{ github.run_id }}
+          path: sync_state.txt
+          if-no-files-found: ignore
+          retention-days: 90
+
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
