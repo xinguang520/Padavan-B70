@@ -1,7 +1,7 @@
 # 极路由 B70 Padavan 固件自动编译 + 运行时套件 (GitHub Actions)
 
-> 自带 **aria2 + PHP 探针**（编译进固件）。  
-> **ShellClash（常开）+ Tailscale（按需常驻）+ aria2 + OTA 自动升级 + Telegram/邮件通知 + Dashboard** 一次打包。
+> 自带 **aria2+AriaNg + Transmission+Web Control**（编译进固件；上游无 PHP 引擎，PHP 探针由 Dashboard 状态面板替代）。  
+> **ShellClash（常开）+ Tailscale（按需）+ sing-box（按需）+ OTA 自动升级 + Telegram/邮件通知 + Dashboard** 一次打包。
 
 
 
@@ -11,41 +11,25 @@
 
 你已刷好不死后台（Breed），所以**直接从第 3 步开始**。
 
-### 步骤 1️⃣ Fork 仓库
+### 步骤 1️⃣ Fork 仓库（如果你还没有自己的仓库）
 
-打开 GitHub 推荐的**任一底仓**（推荐第一个）：
+> ⚠️ 旧版 README 里的"底仓" `zyj20200/Padavan-B70` 已 404 失效。**不需要任何底仓**：
+> CI 会自己 clone 官方源码 `hanwckf/rt-n56u`（即 opt.cn2qq.com 固件的上游）。
+> 本仓库自带全部所需文件（workflow / B70.config / 脚本）。
 
-- **【推荐】** [`zyj20200/Padavan-B70`](https://github.com/zyj20200/Padavan-B70)（即将本目录所有内容推送过去的官方底仓）
-- 或 [`chenxudong2020/Padavan-build`](https://github.com/chenxudong2020/Padavan-build)
-
-点右上角 **`Fork`** 按钮 → 选你自己的 GitHub 账号 → 等 fork 完成（5-10 秒）。
+在 GitHub 上 **Fork** 本仓库（或直接把本目录内容 push 到你自己的新仓库）。
 
 > Fork 后你的仓库地址是 `https://github.com/<你的用户名>/Padavan-B70`
 
-### 步骤 2️⃣ 把本目录所有文件 push 到 fork 仓库
+### 步骤 2️⃣ 确认文件已推送
 
-本目录 `b70-padavan-build/` 里已经包含所有必要的文件。你有两种推送方式：
+如果是 Fork，跳过本步。如果是新建仓库手动上传：
 
-#### 方式 A：本地直接 push（推荐，简单）
+1. 进仓库页面 → **`Add file → Upload files`**
+2. 把仓库里**所有文件+目录**拖进上传框（注意保持目录结构）
+3. **`Commit changes`**
 
-```bash
-cd b70-padavan-build
-git init
-git add .
-git commit -m "B70 Padavan init"
-git branch -M main
-git remote add origin https://github.com/<你的用户名>/Padavan-B70.git
-git push -u origin main
-```
-
-#### 方式 B：在 GitHub 网页上传（不用 Git）
-
-1. 进你 fork 的仓库页面
-2. 点 **`Add file → Upload files`**
-3. 把 `b70-padavan-build/` 里**所有文件+目录**直接拖进上传框
-4. 滚到底 → **`Commit changes`**
-
-> ⚠️ 一定要带 `.github/`、`configs/`、`scripts/`、`etc_storage/`、`clash-yaml/`、`www/` 这些目录（开头是点的目录也要拖进去，必要时用 GitHub Desktop 客户端）
+> ⚠️ 一定要带 `.github/`、`configs/`、`scripts/`、`etc_storage/`、`clash-yaml/`、`www/` 这些目录
 
 ### 步骤 3️⃣ 启用 GitHub Actions
 
@@ -97,9 +81,11 @@ git push -u origin main
 | 模块                  | 来源                 | 体积      | 控制命令                                                      |
 | ------------------- | ------------------ | ------- | --------------------------------------------------------- |
 | **aria2**           | 编译进 firmware       | ~1.5 MB | `aria2.sh start/stop`                                     |
-| **PHP 探针**          | 编译进 firmware       | <100 KB | `http://192.168.123.1/probe.php`                          |
+| **Transmission**    | 编译进 firmware       | ~2.5 MB | Web: USB Applications → Transmission（需插 USB 盘）        |
+| **Dashboard 面板**（PHP 探针替代） | 编译进 firmware | <100 KB | `http://192.168.123.1/cgi-bin/storage/www/dashboard.html` |
 | **ShellClash**      | 首次启动拉取 (jffs2)     | ~10 MB  | `startup.sh clash-start`                                  |
 | **Tailscale**       | 首次启动拉取 (jffs2)     | ~8 MB   | `tailscale.sh install`                                    |
+| **sing-box**        | 脚本按需安装 (jffs2)     | ~10 MB  | `startup.sh sb-install` / `sb-start`                      |
 | **Clash YAML**      | 仓库托管 → 路由器 cron 拉取 | -       | `startup.sh yaml-pull`                                    |
 | **Tailscale 自动升级**  | cron 每周日检查         | -       | `startup.sh ts-upgrade`                                   |
 | **OTA 升级**          | cron 每 10 分钟检测     | -       | `startup.sh fw-check`                                     |
@@ -148,7 +134,7 @@ chmod +x /etc/storage/*.sh
 GITHUB_REPO="<你的用户名>/Padavan-B70"
 mkdir -p /etc/storage/bin /etc/storage/logs /etc/storage/www
 for f in startup.sh clash_yaml_pull.sh tailscale_upgrade.sh notify.sh \
-         firewall_helpers.sh auto_upgrade.sh clash.sh tailscale.sh aria2.sh; do
+         firewall_helpers.sh auto_upgrade.sh clash.sh tailscale.sh aria2.sh sing-box.sh; do
     curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPO}/main/etc_storage/${f}" \
          -o "/etc/storage/${f}"
 done
@@ -316,8 +302,10 @@ SMTP_TO="you@gmail.com"
 | 触发                                | 自动化 | 备注                         |
 | --------------------------------- | --- | -------------------------- |
 | 改任何 `.config / .sh / .yml` 后 push | ✅   | workflow 头 `push:` 段       |
-| 每天 UTC 0:00                       | ✅   | `schedule.cron: 0 0 * * *` |
+| **上游发布站/源码有新版**        | ✅   | `check-updates.yml` 每天 07:07(北京) 检测，变了才重编 |
 | 你手动点 `Run workflow`               | ✅   | Actions 页                  |
+
+（旧版"每天 UTC 0:00 无脑全量编译"已移除——上游 2021 年后基本冻结，每天空跑浪费 Actions 时长。）
 | Star / Unstar 仓库                  | ✅   | 强迫触发用                      |
 
 ### Release 自动发布

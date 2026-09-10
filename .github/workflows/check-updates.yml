@@ -1,0 +1,92 @@
+# 上游更新检测 (轻量, 每天一次, 不编译)
+#
+# 监测两个源:
+#   1. opt.cn2qq.com/padavan/ 当前 B70_*.trx 的文件名/大小/Last-Modified
+#      (作者发布新版固件, 如 -099 → -100, 会体现在这里)
+#   2. GitHub hanwckf/rt-n56u master HEAD commit sha (源码变化)
+#
+# 任一变化 → 更新 configs/upstream-state.json 并触发 Padavan_CI_B70 重编。
+# 作者私有 2026 源码仓库 (opt.cn2qq.com/git/) 不支持匿名 clone, 无法直接跟踪。
+
+name: "Check upstream updates"
+
+on:
+  schedule:
+    - cron: "7 23 * * *"   # 北京时间每天 07:07
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect upstream state
+        id: collect
+        run: |
+          set -e
+          REF_NAME=$(curl -sk --retry 3 "https://opt.cn2qq.com/padavan/" \
+            | grep -oE 'B70_[^"<>]*\.trx' | sort -u | head -1)
+          [ -n "$REF_NAME" ] || { echo "::error::无法解析 opt.cn2qq.com 目录列表"; exit 1; }
+          HEADERS=$(curl -sI --retry 3 "https://opt.cn2qq.com/padavan/${REF_NAME}")
+          SIZE=$(echo "$HEADERS"   | grep -i '^Content-Length:' | awk '{print $2}' | tr -d '\r')
+          LM=$(echo "$HEADERS"     | grep -i '^Last-Modified:'  | sed 's/Last-Modified: //I' | tr -d '\r')
+          GH_SHA=$(curl -s --retry 3 "https://github.com/hanwckf/rt-n56u/commits/master.atom" \
+            | grep -m1 -oE '<id>tag:github.com,2008:Grit::Commit/[0-9a-f]{40}' \
+            | sed 's|.*/||')
+          [ -n "$GH_SHA" ] || GH_SHA=$(git ls-remote https://github.com/hanwckf/rt-n56u.git HEAD | awk '{print $1}')
+          cat > /tmp/new_state.json <<EOF
+          {
+            "opt_file": "$REF_NAME",
+            "opt_size": "$SIZE",
+            "opt_last_modified": "$LM",
+            "rt_n56u_commit": "$GH_SHA",
+            "checked_at": "$(date -u +%FT%TZ)"
+          }
+          EOF
+          echo "--- new state ---"; cat /tmp/new_state.json
+
+      - name: Compare with baseline
+        id: cmp
+        run: |
+          python3 - <<'PY'
+          import json
+          old = json.load(open('configs/upstream-state.json'))
+          new = json.load(open('/tmp/new_state.json'))
+          keys = [k for k in ('opt_file','opt_size','opt_last_modified','rt_n56u_commit')
+                  if str(old.get(k)) != str(new.get(k))]
+          changed = 'true' if keys else 'false'
+          with open('/tmp/github_env','w') as f:
+              f.write(f'CHANGED_KEYS={",".join(keys)}\n')
+          with open('/tmp/changed.txt','w') as f:
+              f.write(changed)
+          print(f'changed={changed} keys={keys}')
+          PY
+          echo "changed=$(cat /tmp/changed.txt)"            >> "$GITHUB_OUTPUT"
+          echo "keys=$(grep CHANGED_KEYS /tmp/github_env | cut -d= -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Commit new baseline
+        if: steps.cmp.outputs.changed == 'true'
+        run: |
+          cp /tmp/new_state.json configs/upstream-state.json
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add configs/upstream-state.json
+          git commit -m "chore(ci): upstream changed (${{ steps.cmp.outputs.keys }}) [skip ci]"
+          git push
+
+      - name: Trigger rebuild
+        if: steps.cmp.outputs.changed == 'true'
+        run: |
+          gh workflow run "Padavan_CI_B70.yml" --ref "${{ github.ref_name }}"
+          echo "已触发重编: ${{ steps.cmp.outputs.keys }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: No change
+        if: steps.cmp.outputs.changed != 'true'
+        run: echo "上游无变化, 跳过重编 (省 Actions 时长)"

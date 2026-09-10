@@ -14,15 +14,14 @@
 #
 # 触发方式:
 #   1. 手动: Actions 页 -> Run workflow
-#   2. 定时: 每天 UTC 0:00 (北京时间 08:00)
+#   2. 自动: check-updates.yml 检测到上游/发布站有新版时触发 workflow_dispatch
 #   3. push: 改 configs/scripts/etc_storage/www/clash-yaml 或本文件都会触发
+#   (每日全量编译已移除 — 上游 2021 后基本冻结, 白白消耗 Actions 时长)
 
 name: "Padavan CI B70"
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 0 * * *"
   push:
     branches: [main, master]
     paths:
@@ -207,37 +206,47 @@ jobs:
       - name: Compare with opt.cn2qq.com reference (sync monitor)
         if: always()
         run: |
-          echo "=== Comparing our build with opt.cn2qq.com/padavan/B70_3.4.3.9-099.trx ==="
-          REF_URL="https://opt.cn2qq.com/padavan/B70_3.4.3.9-099.trx"
+          echo "=== Detecting current B70 trx name on opt.cn2qq.com/padavan/ ==="
+          # 动态解析发布站当前 B70 固件文件名(如 B70_3.4.3.9-099.trx)，
+          # 作者哪天发 -100 也自动跟上
+          REF_NAME=$(curl -sk "https://opt.cn2qq.com/padavan/" \
+            | grep -oE 'B70_[^"<>]*\.trx' | sort -u | head -1)
+          [ -n "$REF_NAME" ] || REF_NAME="B70_3.4.3.9-099.trx"
+          REF_URL="https://opt.cn2qq.com/padavan/${REF_NAME}"
+          echo "Reference file: $REF_NAME"
           REF_HEADERS=$(curl -sI "$REF_URL")
-          echo "$REF_HEADERS" | grep -iE "last-modified|content-length|etag"
+          echo "$REF_HEADERS" | grep -iE "last-modified|content-length"
           REF_LAST_MOD=$(echo "$REF_HEADERS" | grep -i "^Last-Modified:" | sed 's/Last-Modified: //I' | tr -d '\r')
           REF_MD5_NOW=$(curl -s "$REF_URL" | md5sum | awk '{print $1}')
           echo "Reference MD5 (live): $REF_MD5_NOW"
           echo "Reference Last-Modified: $REF_LAST_MOD"
 
-          if [ -f padavan-4.4/trunk/images/B70_3.4.3.9-099.trx ]; then
-            OUR_SIZE=$(stat -c %s padavan-4.4/trunk/images/B70_3.4.3.9-099.trx)
+          OUR_TRX=$(ls padavan-4.4/trunk/images/B70_*.trx 2>/dev/null | head -1)
+          if [ -n "$OUR_TRX" ]; then
+            OUR_SIZE=$(stat -c %s "$OUR_TRX")
             REF_SIZE=$(echo "$REF_HEADERS" | grep -i "^Content-Length:" | awk '{print $2}' | tr -d '\r')
-            echo "Our size   : $OUR_SIZE bytes"
-            echo "Ref size   : $REF_SIZE bytes (opt.cn2qq.com - they bundle more, different entry point)"
+            echo "Our file   : $(basename $OUR_TRX) ($OUR_SIZE bytes)"
+            echo "Ref file   : $REF_NAME ($REF_SIZE bytes)"
+            echo "$REF_NAME" | grep -qF "${OUR_TRX##*/}" && \
+              echo "NOTE: same version string as official" || \
+              echo "NOTE: version string differs from official (expected: ours is 3.4.3.9-<git build>)"
 
             # 写入 build metadata 到 artifacts 供后续对比
             {
               echo "build_time=$(date -u +%FT%TZ)"
               echo "hanwckf_master_commit=$(cd padavan-4.4 && git rev-parse HEAD)"
+              echo "our_trx_file=$(basename $OUR_TRX)"
               echo "our_trx_size=$OUR_SIZE"
-              echo "our_trx_md5=$(md5sum padavan-4.4/trunk/images/B70_3.4.3.9-099.trx | awk '{print $1}')"
+              echo "our_trx_md5=$(md5sum "$OUR_TRX" | awk '{print $1}')"
+              echo "ref_opt_file=$REF_NAME"
               echo "ref_opt_last_modified=$REF_LAST_MOD"
               echo "ref_opt_md5=$REF_MD5_NOW"
               echo "ref_opt_size=$REF_SIZE"
             } > sync_state.txt
             cat sync_state.txt
             echo "---"
-            echo "NOTE: opt.cn2qq.com trx is 6MB larger (bundles more features into firmware)."
-            echo "Functional parity = hanwckf master commit hash matches what opt built from."
-            echo "Auto-sync policy: if hanwckf master advances or opt.cn2qq.com B70 updates,"
-            echo "rerun this workflow and verify opt.cn2qq.com/padavan/MD5.txt matches."
+            echo "NOTE: opt.cn2qq.com trx 更大是因为私源捆绑了 webenv/花生壳/SS+ 等页面。"
+            echo "Auto-sync policy: check-updates.yml 检测到 ref_opt_md5/文件名 变化时自动重编。"
           else
             echo "::warning::Our trx missing — build failed"
           fi
@@ -272,7 +281,7 @@ jobs:
             Auto-built Padavan firmware for 极路由 B70 (HC5962, MT7621).
             Source: hanwckf/rt-n56u (opt.cn2qq.com/padavan/ 上游).
             🛠 Built with [Padavan CI B70](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
-            • Includes: ShellClash + Tailscale + aria2 + Dashboard
+            • Includes: aria2+AriaNg, Transmission+Web Control（固件内置）; ShellClash / Tailscale / sing-box（脚本按需装）
             • See repo README for installation notes
           files: |
             padavan-4.4/trunk/images/*.trx

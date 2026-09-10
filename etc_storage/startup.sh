@@ -92,6 +92,15 @@ aria2_stop() {
     echo "[$(date)] aria2 停止" >> "$LOG/aria2.log"
 }
 
+# ====== sing-box 控制 (委托给 sing-box.sh) ======
+sb() {
+    if [ -x "$STORE/sing-box.sh" ]; then
+        sh "$STORE/sing-box.sh" "$@"
+    else
+        echo "sing-box.sh 不存在, 先拉取: curl -kfsSL https://raw.githubusercontent.com/$GITHUB_REPO/$GITHUB_BRANCH/etc_storage/sing-box.sh -o $STORE/sing-box.sh && chmod +x $STORE/sing-box.sh"
+    fi
+}
+
 # ====== 1) 拉取 Clash YAML 配置(从 GitHub 仓库) ======
 yaml_pull() {
     if [ -x "$STORE/clash_yaml_pull.sh" ]; then
@@ -177,7 +186,7 @@ case "$1" in
         ;;
     install)   install_autostart ;;
     uninstall)
-        rm -f "$BIN/clash"* "$BIN/tailscale"* "$BIN/aria2c" 2>/dev/null
+        rm -f "$BIN/clash"* "$BIN/tailscale"* "$BIN/aria2c" "$BIN/sing-box" 2>/dev/null
         echo "已清理"
         ;;
     clash-start)    clash_start ;;
@@ -188,6 +197,11 @@ case "$1" in
     ts-upgrade)     ts_upgrade ;;
     aria2-start)    aria2_start ;;
     aria2-stop)     aria2_stop ;;
+    sb-install)     sb install ;;
+    sb-start)       sb start ;;
+    sb-stop)        sb stop ;;
+    sb-restart)     sb restart ;;
+    sb-status)      sb status ;;
     yaml-pull)      yaml_pull ;;
     fw-check)       fw_check ;;
     dashboard)      dashboard_update ;;
@@ -201,6 +215,8 @@ case "$1" in
   $0 ts-start    | ts-stop         Tailscale 控制
   $0 ts-upgrade                    Tailscale 升级检测
   $0 aria2-start  | aria2-stop     aria2 控制
+  $0 sb-install                    安装 sing-box 二进制(mipsle)
+  $0 sb-start | sb-stop | sb-restart | sb-status   sing-box 控制
   $0 yaml-pull                     拉取 GitHub Clash YAML 配置
   $0 fw-check                      检测 GitHub Release 新固件
   $0 dashboard                     更新 dashboard 数据

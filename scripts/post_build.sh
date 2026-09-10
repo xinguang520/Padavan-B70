@@ -21,10 +21,9 @@ fi
 # ---- 1. 打包 /etc_storage 脚本 ----
 if [ -d "$ROOT/scripts/etc_storage" ]; then
     echo "[+] Bundling /etc_storage scripts"
-    # 准备压缩包
-    cd "$ROOT/scripts/etc_storage"
+    # 打包 etc_storage 全部内容(含 www/ 子目录), 新脚本自动进包
     tar czf "$IMG_DIR/etc_storage_scripts.tar.gz" \
-        startup.sh clash.sh tailscale.sh aria2.sh firewall_helpers.sh
+        -C "$ROOT/scripts/etc_storage" .
 
     cd "$IMG_DIR"
     sha256sum etc_storage_scripts.tar.gz > etc_storage_scripts.sha256
